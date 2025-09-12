@@ -54,7 +54,7 @@ n_perms = args.n_perms
 seed = args.seed
 save = args.save
 ts_year = args.year
-spatial_mapping_file = args.mapping
+spatial_mapping_file = Path(args.mapping)
 
 
 def mmd_keops(X, Y, gamma=None):
@@ -280,7 +280,8 @@ def _masked_pairwise_sqdist_mean(
       V :(M,N)  0/1 validity (1 if any overlap, else 0)
     """
     assert X.shape == Mx.shape and Y.shape == My.shape
-    M, N, d = X.shape[0], Y.shape[0], X.shape[1]
+    assert X.shape[1] == Y.shape[1], "feature dims must match"
+    d = X.shape[1]
     scale = float(d) if rescale_by_d else 1.0
 
     # Overlap counts k_ij = sum_t m_i,t * m_j,t
@@ -490,7 +491,7 @@ inrix_ts_df_unfiltered = inrix_ts_df_unfiltered.convert_dtypes().assign(
 
 print(f"Time to read unfiltered data: {time.time() - start:.2f} seconds")
 
-print(f"Load spatial mappings...")
+print("Load spatial mappings...")
 spatial_mapping_df = pd.read_csv(spatial_mapping_file)
 spatial_mapping_df = spatial_mapping_df.assign(
     stationid=lambda df: df["stationid"].astype("string"),

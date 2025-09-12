@@ -289,7 +289,9 @@ def _masked_pairwise_sqdist_mean(
       V :(M,N)  0/1 validity (1 if any overlap, else 0)
     """
     assert X.shape == Mx.shape and Y.shape == My.shape
-    M, N, d = X.shape[0], Y.shape[0], X.shape[1]
+    assert X.shape[1] == Y.shape[1], "feature dims must match"
+
+    d = X.shape[1]
     scale = float(d) if rescale_by_d else 1.0
 
     # Overlap counts k_ij = sum_t m_i,t * m_j,t

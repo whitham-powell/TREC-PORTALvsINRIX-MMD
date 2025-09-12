@@ -58,13 +58,8 @@ print(f"len(inrix_df) before dropna() : {len(inrix_df):_}")
 inrix_df = inrix_df.dropna(axis=0, how="any")  # Drop rows with NaN values
 print(f"len(inrix_df) after dropna() : {len(inrix_df):_}")
 
-# print("Filling NaN with 0.0")
-# portal_df = portal_df.fillna(0.0)
-# inrix_df = inrix_df.fillna(0.0)
-# print(f"len(portal_df) : {len(portal_df):_}")
-# print(f"len(inrix_df) : {len(inrix_df):_}")
 
-print(f"Contiguous array to gpu")
+print("Contiguous array to gpu")
 arr2gpu_start = time.time()
 # X == portal, Y == INRIX
 portal_cols = [
@@ -145,13 +140,6 @@ def mmd_keops(X, Y, gamma=None):
 
 Z = torch.cat((X, Y))
 
-# sigma2_iso = (
-#     Z.var(dim=0, unbiased=True).mean().item()
-# )  # average per-feature variance (scalar)
-# gamma = 1 / (2 * sigma2_iso)
-# print(f"Sigma² : {sigma2_iso}")
-# print(f"Gamma : {gamma}")
-
 
 @torch.no_grad()
 def gamma_from_median_heuristic(
@@ -204,7 +192,7 @@ def gamma_from_median_heuristic(
 torch_rng = torch.Generator(device=Z.device).manual_seed(args.seed)
 
 # Compute gamma
-print(f"Start Gamma Compute")
+print("Start Gamma Compute")
 compute_gamma_start = time.time()
 median_heuristic_sample_size = 16000
 
@@ -235,7 +223,7 @@ print(
 )
 
 # %%
-print(f"Start Initial MMD² Compute")
+print("Start Initial MMD² Compute")
 init_mmd2_start = time.time()
 initial_mmd2 = mmd_keops(X, Y, gamma=gamma)
 
@@ -271,7 +259,6 @@ if args.save:
 
     timestamp_string = datetime.now().strftime("%y%m%d-%H%M")
     mmd2_vals_filename = f"{"+".join([Path(f).stem for f in travel_time_data_files])}-{"-".join(portal_cols+inrix_cols)}-{n_permutations}_perms-{timestamp_string}.csv"
-    # mmd2_vals_filename = f"{}-{"-".join(portal_cols+inrix_cols)}-{n_permutations}_perms-{timestamp_string}.csv"
     print(f"Saving MMD² values to {mmd2_vals_filename}")
     mmd2_values_df.to_csv(mmd2_vals_filename, index=False)
 else:
