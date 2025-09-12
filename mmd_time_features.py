@@ -44,6 +44,7 @@ parser.add_argument(
     default="zfill_mask",
     help="Mode for handling missing values: 'zfill', 'mask', or 'zfill_mask'",
 )
+
 args = parser.parse_args()
 
 print(f"Running with args {args}")
@@ -51,8 +52,8 @@ print(f"Running with args {args}")
 n_perms = args.n_perms
 
 travel_time_data_files = (
-    parser.parse_args().portal_data,
-    parser.parse_args().inrix_data,
+    args.portal_data,
+    args.inrix_data,
 )
 
 seed = args.seed

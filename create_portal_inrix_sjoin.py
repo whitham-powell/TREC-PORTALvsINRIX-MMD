@@ -5,7 +5,6 @@
 # optimize the matching based on distance and overlap length.
 # The final matched pairs are saved to CSV files for further analysis.
 
-# %%
 import argparse
 import struct
 

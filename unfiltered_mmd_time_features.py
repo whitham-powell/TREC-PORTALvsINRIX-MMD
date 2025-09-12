@@ -23,7 +23,6 @@ parser.add_argument(
     default=1,
     help="Number of permutations for significance testing",
 )
-
 parser.add_argument(
     "--save", type=bool, default=False, help="Whether to save permutation results"
 )
