@@ -13,7 +13,7 @@ import torch
 from pykeops.torch import LazyTensor
 from tqdm import trange
 
-# 0. Argument parsing
+# Argument parsing
 parser = argparse.ArgumentParser(
     description="Compute MMD² between PORTAL and INRIX travel times using KeOps"
 )
@@ -95,27 +95,27 @@ def mmd_keops(X, Y, gamma=None):
     assert X.shape[1] == Y.shape[1], "X and Y must have the same number of features"
 
     M, N, d = X.shape[0], Y.shape[0], X.shape[1]
-    # 2.  KeOps symbolic variables
+    # KeOps symbolic variables
     x_i = LazyTensor(X[:, None, :])  # (M, 1, d)  – indexed by i
     x_j = LazyTensor(X[None, :, :])  # (1, M, d)  – indexed by j
     y_i = LazyTensor(Y[:, None, :])  # (N, 1, d)
     y_j = LazyTensor(Y[None, :, :])  # (1, N, d)
 
-    # 3.  RBF kernel with γ = 1 / d   (matches scikit‑learn’s default)
-    γ = gamma if gamma is not None else 1.0 / d
+    # RBF kernel with gamma = 1 / d   (matches scikit‑learn’s default)
+    gam = gamma if gamma is not None else 1.0 / d
 
-    K_xx = (-γ * x_i.sqdist(x_j)).exp()  # (M, M) symbolic block
-    K_yy = (-γ * y_i.sqdist(y_j)).exp()  # (N, N)
-    K_xy = (-γ * x_i.sqdist(y_j)).exp()  # (M, N)
+    K_xx = (-gam * x_i.sqdist(x_j)).exp()  # (M, M) symbolic block
+    K_yy = (-gam * y_i.sqdist(y_j)).exp()  # (N, N)
+    K_xy = (-gam * x_i.sqdist(y_j)).exp()  # (M, N)
 
-    # 4.  Total sums of the three blocks
+    # Total sums of the three blocks
     S_xx = K_xx.sum(dim=1).sum()  # torch scalar
     S_yy = K_yy.sum(dim=1).sum()
     S_xy = K_xy.sum(dim=1).sum()
 
-    # 5.  Diagonal corrections  (same‑index trick, still O(M d) / O(N d))
-    # diag_xx_sum = (-γ * x_i.sqdist(x_i)).exp().sum(dim=1).sum()  # = M for RBF
-    # diag_yy_sum = (-γ * y_i.sqdist(y_i)).exp().sum(dim=1).sum()  # = N
+    # Diagonal corrections  (same‑index trick, still O(M d) / O(N d))
+    # diag_xx_sum = (-gam * x_i.sqdist(x_i)).exp().sum(dim=1).sum()  # = M for RBF
+    # diag_yy_sum = (-gam * y_i.sqdist(y_i)).exp().sum(dim=1).sum()  # = N
     diag_xx_sum = torch.tensor(
         M, dtype=torch.float64, device=X.device
     )  # for RBF kernel
@@ -123,9 +123,7 @@ def mmd_keops(X, Y, gamma=None):
         N, dtype=torch.float64, device=Y.device
     )  # for RBF kernel
 
-    # 6.  Unbiased MMD²  (all plain torch scalars from here on)
-    # M_f, N_f = float(M), float(N)
-
+    # Unbiased MMD²  (all plain torch scalars from here on)
     M_f = torch.tensor(float(M), dtype=torch.float64, device=X.device)
     N_f = torch.tensor(float(N), dtype=torch.float64, device=Y.device)
 
