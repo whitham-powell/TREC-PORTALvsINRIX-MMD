@@ -226,8 +226,7 @@ inrix_meta_cols = [
     "inrix_seg_len_m",
 ]
 
-# Load CSV
-
+# Load PORTAL Metadata
 portal_stations_df = pd.read_csv(portal_stations_meta_file)
 portal_highways_df = pd.read_csv(portal_highways_meta_file)
 
