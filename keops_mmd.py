@@ -2,6 +2,7 @@
 # with permutation test for significance.
 # Uses GPU acceleration via PyKeOps.
 
+import argparse
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,10 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pykeops.torch import LazyTensor
-
 from tqdm import trange
-
-import argparse
 
 # 0. Argument parsing
 parser = argparse.ArgumentParser(

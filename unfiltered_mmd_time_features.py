@@ -2,6 +2,7 @@
 # Loops through each mode: zfill, mask, zfill_mask
 # Creates pivots from unfiltered time series data on the fly.
 
+import argparse
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,10 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pykeops.torch import LazyTensor
-
 from tqdm import trange
-
-import argparse
 
 # 0. Argument parsing
 parser = argparse.ArgumentParser(

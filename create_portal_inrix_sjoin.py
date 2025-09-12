@@ -16,7 +16,6 @@ from matplotlib.pylab import f
 from scipy.optimize import linear_sum_assignment
 from shapely.wkb import loads as wkb_loads
 
-
 parser = argparse.ArgumentParser(
     description="Create a spatial join between INRIX and PORTAL data using GeoPandas and the Hungarian algorithm."
 )
