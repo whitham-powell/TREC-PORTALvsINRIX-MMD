@@ -230,7 +230,7 @@ print(
 )
 
 # %%
-# 7. Permutation test
+# Permutation test
 
 n_permutations = args.n_perms
 N = X.shape[0] + Y.shape[0]
