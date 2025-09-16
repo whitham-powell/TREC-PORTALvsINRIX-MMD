@@ -18,7 +18,7 @@ The codebase provides multiple MMD computation strategies to handle missing data
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12+
 - CUDA-capable GPU (required)
   - Minimum: ~4GB for filtered data
   - Recommended: 100GB for full unfiltered analysis with masking
