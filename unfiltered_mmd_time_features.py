@@ -659,7 +659,9 @@ for mode in ["zfill", "mask", "zfill_mask"]:
                     rescale_by_d=True,
                 )
                 for _ in range(median_heuristic_iterations)
-            ]
+            ],
+            device=Z.device,
+            dtype=Z.dtype,
         )
         print(
             f"Gamma spread: {((torch.max(gammas) - torch.min(gammas)) / torch.mean(gammas))*100:.6g}% with Median Heuristic Iterations: {median_heuristic_iterations}"
