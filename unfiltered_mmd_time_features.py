@@ -8,7 +8,8 @@ three missing data strategies sequentially.
 Notes:
     Requires CUDA GPU (memory depends on number of sensors and time slots).
     Uses torch for masked computations and PyKeOps for GPU-accelerated kernel computations.
-    Full year processing (500 permutations): ~12 hours on NVIDIA 3090, ~2.5 hours on NVIDIA H200.
+    Reshapes data to ~35k features × ~200 samples for efficient computation.
+    Memory usage: ~4GB (zfill mode), ~100GB (mask mode).
 
 Usage:
     python unfiltered_mmd_time_features.py --year 2023 --n_perms 500 --save True
