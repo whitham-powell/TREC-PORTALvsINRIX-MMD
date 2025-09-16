@@ -1,9 +1,41 @@
-# create_portal_inrix_sjoin.py - used to create the spatial join between INRIX and PORTAL data
-# using GeoPandas and the Hungarian algorithm.
-# The script reads in metadata and geometries for both datasets, standardizes directions,
-# performs a spatial join to find nearest matches, and applies the Hungarian algorithm to
-# optimize the matching based on distance and overlap length.
-# The final matched pairs are saved to CSV files for further analysis.
+"""
+Create spatial join between PORTAL detector stations and INRIX TMC segments using Hungarian algorithm.
+
+This script performs optimal one-to-one matching between PORTAL traffic detectors and INRIX road 
+segments based on spatial proximity and direction compatibility. It handles complex geometry 
+processing, direction normalization, and solves a global assignment problem to ensure each 
+PORTAL station maps to at most one INRIX segment.
+
+Key Processing Steps:
+    1. Normalize directions (NORTHBOUND→NORTH, etc.) for consistent filtering
+    2. Convert PORTAL WKB/EWKB hex strings to geometries and reproject to EPSG:3857
+    3. Find candidate matches via spatial join within max_dist threshold
+    4. Filter to direction-compatible pairs only
+    5. Solve Hungarian assignment minimizing total log1p(distance) cost
+    6. Output one-to-one station-to-TMC mappings
+
+Notes:
+    Requires spatial indexing support (pygeos/Shapely 2.x recommended).
+    All distance calculations performed in EPSG:3857 (meters).
+    Direction normalization handles various formats (NB, NORTHBOUND, NORT → NORTH).
+
+Usage:
+    python create_portal_inrix_sjoin.py --year 2023 --max_dist 10.0 --threshold 0.5
+
+Required Inputs:
+    - PORTAL stations CSV: stationid, highwayid, segment_geom (WKB/EWKB hex), station_geom
+    - PORTAL highways CSV: highwayid, direction, bound, highwayname  
+    - INRIX metadata CSV: tmc list for filtering
+    - INRIX geometries Parquet: tmc, geometry, direction, route_id
+
+Output:
+    data/{year}_portal_inrix_spatial_join_hungarian_ids_only.csv
+        Minimal mapping: stationid, tmc
+    
+    data/{year}_portal_inrix_spatial_join_hungarian.csv
+        Full metadata: stationid, portal_highwayname, portal_direction, portal_seg_len_m,
+                      tmc, inrix_route_id, inrix_standardized_direction, inrix_seg_len_m
+"""
 
 import argparse
 import struct
@@ -66,7 +98,39 @@ print(f"Running with args {args}")
 
 def standardize_direction(direction, bound=None):
     """
-    Standardize direction formats between PORTAL and INRIX
+    Standardize roadway direction values between PORTAL and INRIX formats.
+
+    Normalizes various direction strings to one of 'NORTH', 'SOUTH', 'EAST', or 'WEST'.
+    If the primary direction cannot be resolved from the `direction` argument, the
+    `bound` abbreviation is used as a fallback.
+
+    Args:
+        direction (str): Raw direction value (e.g., 'NORTHBOUND', 'south', 'NORT', 'CONST').
+            Case-insensitive; will be uppercased before matching.
+        bound (str | None): Optional fallback bound abbreviation (e.g., 'NB', 'SB', 'EB', 'WB').
+            Used only when `direction` cannot be mapped. Case-insensitive.
+
+    Returns:
+        Optional[str]: One of 'NORTH', 'SOUTH', 'EAST', 'WEST', or None when the value denotes
+        construction or cannot be resolved (e.g., 'CONST', 'JB', 'ZB', or unknown inputs).
+
+    Raises:
+        AttributeError: If `direction` (or `bound` when used) is not a string and
+        does not support `.upper()`.
+
+    Examples:
+        >>> standardize_direction('NORTHBOUND')
+        'NORTH'
+        >>> standardize_direction('north')
+        'NORTH'
+        >>> standardize_direction('NORT')
+        'NORTH'
+        >>> standardize_direction('CONST') is None
+        True
+        >>> standardize_direction('unknown', bound='NB')
+        'NORTH'
+        >>> standardize_direction('unknown', bound='JB') is None
+        True
     """
     direction_map = {
         # INRIX formats
@@ -101,6 +165,33 @@ def standardize_direction(direction, bound=None):
 
 
 def check_ewkb_srid(wkb_hex):
+    """
+    Extract the SRID from a hex-encoded EWKB geometry.
+
+    This function inspects the EWKB (PostGIS Extended WKB) type flag to determine
+    whether an SRID is present. If the SRID flag (0x20000000) is set, it reads and
+    returns the SRID value; otherwise, it returns None.
+
+    Args:
+        wkb_hex (str): Hex-encoded WKB/EWKB geometry bytes (no "0x" prefix required).
+
+    Returns:
+        Optional[int]: The SRID (e.g., 4326) if present, otherwise None.
+
+    Raises:
+        ValueError: If the input string is not valid hexadecimal.
+        struct.error: If the byte sequence is too short or malformed for unpacking.
+
+    Notes:
+        - Endianness is read from the first byte: 0 for big-endian, 1 for little-endian.
+        - The EWKB SRID presence is indicated by the 0x20000000 bit in the type word.
+
+    Examples:
+        >>> # EWKB with SRID=4326 (example only)
+        >>> srid = check_ewkb_srid("0101000020E6100000000000000000F03F0000000000000040")
+        >>> srid
+        4326
+    """
     # Convert hex to bytes
     wkb_bytes = bytes.fromhex(wkb_hex)
 
@@ -118,6 +209,35 @@ def check_ewkb_srid(wkb_hex):
 
 
 def wkb_to_geom(wkb_hex):
+    """
+    Convert a hex-encoded WKB/EWKB string to a Shapely geometry.
+
+    This function parses a hexadecimal Well-Known Binary (WKB/EWKB) representation
+    into a Shapely geometry object. It is tolerant of missing or invalid inputs.
+
+    Args:
+        wkb_hex (str | Any): Hex-encoded WKB/EWKB string. None, NaN (pandas NA),
+            or empty/whitespace-only strings are treated as missing.
+
+    Returns:
+        shapely.geometry.base.BaseGeometry | None: The parsed geometry if conversion
+        succeeds; otherwise None for missing or invalid input.
+
+    Behavior:
+        - Returns None for None/NaN/empty inputs.
+        - On conversion errors (e.g., invalid hex or WKB), prints a diagnostic message
+          and returns None.
+
+    Dependencies:
+        - pandas (for NA detection)
+        - shapely (for WKB loading)
+
+    Example:
+        >>> wkb_hex = "0101000000000000000000F03F0000000000000040"  # POINT (1 2)
+        >>> geom = wkb_to_geom(wkb_hex)
+        >>> geom.wkt
+        'POINT (1 2)'
+    """
     try:
         if pd.isna(wkb_hex) or not wkb_hex.strip():
             return None
@@ -130,6 +250,43 @@ def wkb_to_geom(wkb_hex):
 
 
 def tag(df, tag, keys):
+    """
+    Add a tag-specific prefix to all non-key columns while preserving key columns.
+
+    This helper sets the DataFrame index to `keys`, prefixes all non-key columns with
+    `f"{tag}_"`, restores the key column names, and returns a flat DataFrame with the
+    keys as columns.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame.
+    tag : str
+        Prefix to add to each non-key column name. Final column names will be like
+        `f"{tag}_{col}"`.
+    keys : str | list[str]
+        Column name or list of column names to treat as keys.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing the original key columns followed by the remaining
+        columns renamed with the given prefix.
+
+    Raises
+    ------
+    KeyError
+        If any of `keys` are not present in `df`.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({"id": [1, 2], "a": [10, 20], "b": [30, 40]})
+    >>> tag(df, "x", "id")
+       id  x_a  x_b
+    0   1   10   30
+    1   2   20   40
+    """
     return (
         df.set_index(keys)
         .add_prefix(f"{tag}_")
@@ -139,6 +296,52 @@ def tag(df, tag, keys):
 
 
 def hungarian_dist(cand_gdf, threshold=0.5):
+    """
+    Compute a minimum-cost one-to-one matching between stations and TMCs using the Hungarian algorithm.
+
+    This function builds a bipartite cost matrix from candidate (stationid, tmc) pairs and uses
+    scipy.optimize.linear_sum_assignment to find a globally optimal matching. The cost for each
+    feasible edge is log1p(gpd_distance). Edges not present in the input are treated as infeasible
+    and are never selected. The result includes the chosen pairs and associated metrics.
+
+    Parameters
+    ----------
+    cand_gdf : pandas.DataFrame
+        Candidate pairs with at least the following columns:
+          - 'stationid': identifier of the detector/station (hashable)
+          - 'tmc': identifier of the TMC segment (hashable)
+          - 'gpd_distance': non-negative float distance in meters between geometries
+          - 'overlap_len': float measure of overlap length (used for tie-breaking in an intermediate step)
+    threshold : float, optional
+        Distance tolerance in meters intended to treat near-duplicate edges as equivalent.
+        Note: In the current implementation this tolerance does not affect the final assignment,
+        because the reduction to one edge per (stationid, tmc) ultimately keeps only the smallest
+        distance edge. Default is 0.5.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per selected match with columns:
+          - 'stationid'
+          - 'tmc'
+          - 'gpd_distance'
+          - 'overlap_len'
+          - 'dist_scaled' (log1p of gpd_distance)
+
+    Notes
+    -----
+    - Costs use log1p(distance) to temper large outliers while preserving ordering.
+    - Matching is one-to-one across unique stations and TMCs; pairs without any feasible edge
+      are omitted from the output.
+    - The function asserts that 'stationid' and 'tmc' are unique in the result.
+    - The 'threshold' parameter is present for intended near-duplicate squashing but is effectively
+      a no-op in the current logic.
+
+    Raises
+    ------
+    AssertionError
+        If the resulting matches contain duplicate 'stationid' or duplicate 'tmc'.
+    """
     eps = threshold  # meters threshold for "same" distance
     C = cand_gdf[["stationid", "tmc", "gpd_distance", "overlap_len"]].copy()
     C["dist_scaled"] = np.log1p(C["gpd_distance"])

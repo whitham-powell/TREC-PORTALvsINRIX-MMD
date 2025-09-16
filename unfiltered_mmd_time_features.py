@@ -1,6 +1,31 @@
-# unfiltered_mmd_time_features.py -- Uses torch for masked computations.
-# Loops through each mode: zfill, mask, zfill_mask
-# Creates pivots from unfiltered time series data on the fly.
+"""
+Compute MMD² between PORTAL and INRIX travel times using time slots as features.
+
+This script treats each time slot as a feature dimension, with sensor locations as samples.
+It creates pivoted data from unfiltered time series on the fly, then computes MMD² using
+three missing data strategies sequentially.
+
+Notes:
+    Requires CUDA GPU (memory depends on number of sensors and time slots).
+    Uses torch for masked computations and PyKeOps for GPU-accelerated kernel computations.
+    Full year processing (500 permutations): ~12 hours on NVIDIA 3090, ~2.5 hours on NVIDIA H200.
+
+Usage:
+    python unfiltered_mmd_time_features.py --year 2023 --n_perms 500 --save True
+
+Required Inputs:
+    - data/{year}_portal_ts_unfiltered.csv: PORTAL time series (stationid, portal_tstamp, portal_tt)
+    - data/{year}_inrix_ts_unfiltered.csv: INRIX time series (tmc_code, inrix_tstamp, inrix_tt)
+
+Processing Modes (runs all three):
+    zfill: Z-score normalize then zero-fill NaN (compare all time slots)
+    mask: Raw values, only compare overlapping observations
+    zfill_mask: Z-score but preserve NaN for masking (normalized + missing-aware)
+
+Output:
+    If --save=True, creates separate CSV for each mode:
+    {year}-time_features_unfiltered-{mode}-{n_perms}_perms-{timestamp}.csv
+"""
 
 import argparse
 import time
@@ -47,6 +72,37 @@ ts_year = args.year
 
 
 def mmd_keops(X, Y, gamma=None):
+    """Compute the unbiased squared Maximum Mean Discrepancy (MMD^2) between two
+    samples using a Gaussian RBF kernel evaluated with KeOps LazyTensors.
+
+    This function avoids forming full MxM, NxN, and MxN kernel matrices in memory
+    by computing sums symbolically with KeOps, which is efficient on large datasets
+    and supports CPU/GPU tensors.
+
+    Args:
+        X (torch.Tensor): A tensor of shape (M, d) containing M samples with d features.
+        Y (torch.Tensor): A tensor of shape (N, d) containing N samples with d features.
+        gamma (float, optional): Inverse bandwidth of the RBF kernel. If None, uses
+            1.0 / d, matching scikit-learn's default for the RBF kernel.
+
+    Returns:
+        float: The unbiased estimate of MMD^2 between the empirical distributions
+        of X and Y.
+
+    Raises:
+        AssertionError: If X and Y do not have the same number of features.
+
+    Notes:
+        - Uses the unbiased MMD^2 estimator:
+            MMD^2 = E[k(X, X')] + E[k(Y, Y')] - 2 E[k(X, Y)]
+          with diagonal self-similarities removed and denominators M(M-1), N(N-1).
+        - The RBF kernel is k(u, v) = exp(-gamma * ||u - v||^2).
+        - If gamma is None, it defaults to 1/d.
+        - Final computation is performed in float64 for improved numerical stability,
+          and the returned value is a Python float.
+        - Requires M >= 2 and N >= 2 to avoid division by zero in the unbiased estimator.
+        - X and Y can reside on CPU or GPU; computations occur on their respective devices.
+    """
 
     assert X.shape[1] == Y.shape[1], "X and Y must have the same number of features"
 

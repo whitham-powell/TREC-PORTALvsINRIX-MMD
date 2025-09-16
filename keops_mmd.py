@@ -1,6 +1,31 @@
-# keops_mmd.py - Compute MMD² between PORTAL and INRIX travel times using KeOps
-# with permutation test for significance.
-# Uses GPU acceleration via PyKeOps.
+"""
+Compute MMD² between PORTAL and INRIX travel times using direct travel time comparison.
+
+This script performs a simple MMD² test on filtered travel time distributions, treating
+each observation as a scalar value. NaN values are dropped before computation. This can
+and is used with any number of stations/TMCs, as long as there are at least two
+observations in each dataset.
+
+Notes:
+    Requires CUDA GPU (minimal memory requirements for 1D data).
+    Uses PyKeOps for GPU-accelerated kernel computations.
+    This is the simplest MMD variant - no feature engineering or missing data handling.
+
+Usage:
+    python keops_mmd.py --portal_data data/2023_portal_ts_sjoin_2023_filtered.csv \
+                        --inrix_data data/2023_inrix_ts_sjoin_2023_filtered.csv \
+                        --n_perms 500 --save True
+
+Required Inputs:
+    - PORTAL filtered travel times CSV with columns: stationid (index), portal_tt
+    - INRIX filtered travel times CSV with columns: tmc_code (index), inrix_tt
+
+Output:
+    If --save=True, creates CSV with filename pattern:
+    {portal_file_stem}+{inrix_file_stem}-{column_names}-{n_perms}_perms-{timestamp}.csv
+    
+    Example: 2023_portal_ts_sjoin_2023_filtered+2023_inrix_ts_sjoin_2023_filtered-portal_tt-inrix_tt-500_perms-240315-1423.csv
+"""
 
 import argparse
 import time
@@ -64,26 +89,26 @@ arr2gpu_start = time.time()
 # X == portal, Y == INRIX
 portal_cols = [
     "portal_tt",
-]  # "portal_length_mid"]
+    # "portal_length_mid", # example additional metadata feature if desired
+]
 portal_arr = portal_df[portal_cols].to_numpy(dtype=np.float32, copy=False)
-# portal_arr = portal_df.to_numpy(dtype=np.float64, copy=False)
 portal_arr = np.ascontiguousarray(portal_arr)
 
 X_cpu = torch.from_numpy(portal_arr)
 X = X_cpu.pin_memory().to("cuda", non_blocking=True)
-# X = torch.tensor(portal, dtype=torch.float64, device="cuda")
 
 print(f"Time to convert portal array to GPU: {time.time() - arr2gpu_start:.2f} seconds")
 
 
-inrix_cols = ["inrix_tt"]  # , "Miles"]
+inrix_cols = [
+    "inrix_tt",
+    # "Miles" # example additional metadata feature if desired
+]
 inrix_arr = inrix_df[inrix_cols].to_numpy(dtype=np.float32, copy=False)
-# inrix_arr = inrix_df.to_numpy(dtype=np.float64, copy=False)
 inrix_arr = np.ascontiguousarray(inrix_arr)
 
 Y_cpu = torch.from_numpy(inrix_arr)
 Y = Y_cpu.pin_memory().to("cuda", non_blocking=True)
-# Y = torch.tensor(inrix, dtype=torch.float64, device="cuda")
 
 print(f"Time to convert INRIX array to GPU: {time.time() - arr2gpu_start:.2f} seconds")
 
@@ -91,6 +116,37 @@ print(f"Time to convert INRIX array to GPU: {time.time() - arr2gpu_start:.2f} se
 
 
 def mmd_keops(X, Y, gamma=None):
+    """Compute the unbiased squared Maximum Mean Discrepancy (MMD^2) between two
+    samples using a Gaussian RBF kernel evaluated with KeOps LazyTensors.
+
+    This function avoids forming full MxM, NxN, and MxN kernel matrices in memory
+    by computing sums symbolically with KeOps, which is efficient on large datasets
+    and supports CPU/GPU tensors.
+
+    Args:
+        X (torch.Tensor): A tensor of shape (M, d) containing M samples with d features.
+        Y (torch.Tensor): A tensor of shape (N, d) containing N samples with d features.
+        gamma (float, optional): Inverse bandwidth of the RBF kernel. If None, uses
+            1.0 / d, matching scikit-learn's default for the RBF kernel.
+
+    Returns:
+        float: The unbiased estimate of MMD^2 between the empirical distributions
+        of X and Y.
+
+    Raises:
+        AssertionError: If X and Y do not have the same number of features.
+
+    Notes:
+        - Uses the unbiased MMD^2 estimator:
+            MMD^2 = E[k(X, X')] + E[k(Y, Y')] - 2 E[k(X, Y)]
+          with diagonal self-similarities removed and denominators M(M-1), N(N-1).
+        - The RBF kernel is k(u, v) = exp(-gamma * ||u - v||^2).
+        - If gamma is None, it defaults to 1/d.
+        - Final computation is performed in float64 for improved numerical stability,
+          and the returned value is a Python float.
+        - Requires M >= 2 and N >= 2 to avoid division by zero in the unbiased estimator.
+        - X and Y can reside on CPU or GPU; computations occur on their respective devices.
+    """
 
     assert X.shape[1] == Y.shape[1], "X and Y must have the same number of features"
 
