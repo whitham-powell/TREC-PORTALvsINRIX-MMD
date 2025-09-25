@@ -184,7 +184,7 @@ If you use this code in your research, please cite:
   title = {{TREC-PORTAL vs INRIX MMD Analysis: Statistical Comparison of Traffic Data Sources}},
   author = {Elijah Whitham-Powell},
   year = {2025},
-  url = {https://github.com/yourusername/TREC-PORTALvsINRIX-MMD},
+  url = {https://github.com/whitham-powell/TREC-PORTALvsINRIX-MMD},
   note = {Software for computing Maximum Mean Discrepancy between PORTAL and INRIX traffic data}
 }
 ```
